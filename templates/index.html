@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>EDC Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        form {
+            background: #f4f4f4;
+            padding: 20px;
+            border-radius: 5px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="file"], input[type="text"] {
+            margin-bottom: 15px;
+            width: 100%;
+            padding: 8px;
+        }
+        input[type="submit"] {
+            background: #333;
+            color: #fff;
+            padding: 10px 15px;
+            border: none;
+            cursor: pointer;
+        }
+        input[type="submit"]:hover {
+            background: #555;
+        }
+        .file-preview {
+            margin-top: 5px;
+            font-size: 0.9em;
+            color: #666;
+        }
+        .section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #fff;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            cursor: pointer;
+            margin-bottom: 15px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Upload Files for EDC Report</h1>
+    <form id="uploadForm" method="post" enctype="multipart/form-data">
+      <div class="section">
+          <h2>TAMS Sharing</h2>
+          <label>File Data Aktif Bertransaksi Tams Sharing:</label>
+          <input type="file" name="file_data_aktif_sharing" multiple>
+          <div class="file-preview" id="preview_file_data_aktif_sharing"></div>
+
+          <label>File Terminal Download Tams Sharing:</label>
+          <input type="file" name="file_terminal_download_sharing" multiple>
+          <div class="file-preview" id="preview_file_terminal_download"></div>
+
+          <label>File Terminal Version A920 PRO Tams Sharing:</label>
+          <input type="file" name="file_terminal_version_a920_sharing" multiple>
+          <div class="file-preview" id="preview_file_terminal_version_a920"></div>
+
+          <label>File Terminal Version X990 Tams Sharing:</label>
+          <input type="file" name="file_terminal_version_x990_sharing" multiple>
+          <div class="file-preview" id="preview_file_terminal_version_x990"></div>
+
+          <label>Input Version A920Pro Tams Sharing:</label>
+          <input type="text" name="version_a920pro_sharing" placeholder="Version A920Pro" required>
+
+          <label>Input Version X990 Tams Sharing:</label>
+          <input type="text" name="version_x990_sharing" placeholder="Version X990" required>
+      </div>
+
+      <div class="section" id="fmsSection">
+          <h2>TAMS FMS</h2>
+          <button type="button" onclick="toggleFMS()">Toggle TAMS FMS</button>
+          <div id="fmsContent">
+              <label>File Data Aktif Bertransaksi Tams FMS:</label>
+              <input type="file" name="file_data_aktif_fms" multiple>
+              <div class="file-preview" id="preview_file_data_aktif_fms"></div>
+
+              <label>File Terminal Download Tams FMS:</label>
+              <input type="file" name="file_terminal_download_fms" multiple>
+              <div class="file-preview" id="preview_file_terminal_download_fms"></div>
+
+              <label>File Terminal Version A920 PRO Tams FMS:</label>
+              <input type="file" name="file_terminal_version_a920_fms" multiple>
+              <div class="file-preview" id="preview_file_terminal_version_a920_fms"></div>
+
+              <label>File Terminal Version X990 Tams FMS:</label>
+              <input type="file" name="file_terminal_version_x990_fms" multiple>
+              <div class="file-preview" id="preview_file_terminal_version_x990_fms"></div>
+
+              <label>Input Version A920Pro Tams FMS:</label>
+              <input type="text" name="version_a920pro_fms" placeholder="Version A920Pro FMS" required>
+
+              <label>Input Version X990 FMS:</label>
+              <input type="text" name="version_x990_fms" placeholder="Version X990 FMS" required>
+          </div>
+      </div>
+
+      <input type="submit" value="Upload">
+  </form>
+  
+      <script>
+          function previewFile(input) {
+              const file = input.files[0];
+              if (file) {
+                  const reader = new FileReader();
+                  reader.onload = function(e) {
+                      const preview = document.getElementById('preview_' + input.name);
+                      preview.innerHTML = `Selected file: ${file.name}`;
+                  }
+                  reader.readAsDataURL(file);
+              }
+          }
+  
+          function toggleFMS() {
+              const fmsContent = document.getElementById('fmsContent');
+              const fmsSection = document.getElementById('fmsSection');
+              fmsContent.classList.toggle('hidden');
+              const inputs = fmsContent.getElementsByTagName('input');
+              for (let input of inputs) {
+                  input.required = !fmsContent.classList.contains('hidden');
+              }
+              fmsSection.style.backgroundColor = fmsContent.classList.contains('hidden') ? '#f4f4f4' : '#fff';
+          }
+  
+          document.getElementById('uploadForm').onsubmit = function(e) {
+              const requiredInputs = this.querySelectorAll('input[required]:not(.hidden)');
+              for (let input of requiredInputs) {
+                  if (!input.value) {
+                      alert(`Please fill out the field: ${input.name}`);
+                      e.preventDefault();
+                      return false;
+                  }
+              }
+              return true;
+          }
+  
+          // Initialize FMS section as hidden
+          document.addEventListener('DOMContentLoaded', function() {
+              toggleFMS();
+          });
+      </script>
+  </body>
+  </html>
