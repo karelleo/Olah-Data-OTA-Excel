@@ -17,20 +17,7 @@ from openpyxl.chart.label import DataLabelList
 
 #Chart Buat 
 
-def create_pie_chart(sizes, labels, colors, title):
-    fig, ax = plt.subplots(figsize=(10, 7))
-    ax.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
-    ax.axis('equal')
-    plt.title(title)
-    
-    img_buffer = io.BytesIO()
-    plt.savefig(img_buffer, format='png')
-    img_buffer.seek(0)
-    img = Image(img_buffer)
-    plt.close(fig)
-    return img
-
-import logging
+import numpy as np
 
 def create_charts(data, total_populasi, version_a920pro):
     charts = []
@@ -44,8 +31,8 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [download_sharing, calculate_inactive(download_sharing)],
         ['Downloaded', 'Not Downloaded'],
-        ['#0000ff', '#ff9999'],
-        'Data Download Tams Sharing 10.2.2.5:7000'
+        ['#0000ff', '#ff0000'],
+        'Data Download Tams Sharing\n10.2.2.5:7000\n\n'
     ))
 
     # 2. Data Apply Tams Sharing 10.2.2.5:7000
@@ -53,8 +40,8 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [apply_sharing, calculate_inactive(apply_sharing)],
         ['Applied', 'Not Applied'],
-        ['#0000ff', '#ff9999'],
-        'Data Apply Tams Sharing 10.2.2.5:7000'
+        ['#0000ff', '#ff0000'],
+        'Data Apply Tams Sharing\n10.2.2.5:7000\n\n'
     ))
 
     # 3. Data Download Tams FMS 10.2.30.2:7000
@@ -62,8 +49,8 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [download_fms, calculate_inactive(download_fms)],
         ['Downloaded', 'Not Downloaded'],
-        ['#0000ff', '#ff9999'],
-        'Data Download Tams FMS 10.2.30.2:7000'
+        ['#0000ff', '#ff0000'],
+        'Data Download Tams FMS\n10.2.30.2:7000\n\n'
     ))
 
     # 4. Data Apply Tams FMS 10.2.30.2:7000
@@ -71,8 +58,8 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [apply_fms, calculate_inactive(apply_fms)],
         ['Applied', 'Not Applied'],
-        ['#0000ff', '#ff9999'],
-        'Data Apply Tams FMS 10.2.30.2:7000'
+        ['#0000ff', '#ff0000'],
+        'Data Apply Tams FMS\n10.2.30.2:7000\n\n'
     ))
 
     # 5 & 6. Data Download/Apply Tams FMS dan Sharing
@@ -82,67 +69,78 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [download_combined, calculate_inactive(download_combined)],
         ['Downloaded', 'Not Downloaded'],
-        ['#0000ff', '#ff9999'],
-        'Data Download Tams FMS dan Sharing'
+        ['#0000ff', '#ff0000'],
+        'Data Download Tams FMS dan Sharing\n\n'
     ))
     
     charts.append(create_pie_chart(
         [apply_combined, calculate_inactive(apply_combined)],
         ['Applied', 'Not Applied'],
-        ['#0000ff', '#ff9999'],
-        'Data Apply Tams FMS dan Sharing'
+        ['#0000ff', '#ff0000'],
+        'Data Apply Tams FMS dan Sharing\n\n'
     ))
 
-        # 7. Data Update Aplikasi Versi
+
+       # 7. Data Update Aplikasi Versi
     active_transaction = data['sharing'].get('Active transaksi', {}).get('Total', 0) + data['fms'].get('Active transaksi', {}).get('Total', 0)
     downloaded = download_combined
     active_not_downloaded = max(0, active_transaction - downloaded)
     inactive = max(0, total_populasi - downloaded - active_not_downloaded)
 
+    # Mengambil 2 digit awal dari versi aplikasi
+    version_2digit = '.'.join(version_a920pro.split('.')[:2])
+
     charts.append(create_pie_chart(
         [downloaded, active_not_downloaded, inactive],
-        ['Downloaded', 'Active Not Downloaded', 'Inactive'],
-        ['#ffa500', '#0000ff', '#ff9999'],
-        f'Data Update Aplikasi Versi {version_a920pro} Primavista'
+        ['EDC Sudah OTA', 'EDC Belum OTA', 'EDC Tidak Aktif'],
+        ['#ffa500', '#0000ff', '#ff0000'],
+        f'Data Update Aplikasi Versi {version_2digit} Primavista \n\n '
     ))
 
     return charts
 
 def create_pie_chart(sizes, labels, colors, title):
-    fig, ax = plt.subplots(figsize=(10, 7))
+    fig, ax = plt.subplots(figsize=(4, 3))  # Mengubah ukuran menjadi 4x3 inch
     
     total = sum(sizes)
     
-    def make_autopct(values):
-        def my_autopct(pct):
+    def autopct_format(values):
+        def my_format(pct):
             total = sum(values)
             val = int(round(pct*total/100.0))
-            return f'{val:d} ({pct:.1f}%)'
-        return my_autopct
+            return f'{val:,}\n({pct:.1f}%)'
+        return my_format
     
-    wedges, texts, autotexts = ax.pie(sizes, labels=labels, colors=colors, 
-                                      autopct=make_autopct(sizes), 
-                                      startangle=90)
+    wedges, texts, autotexts = ax.pie(sizes, 
+                                      labels=labels, 
+                                      colors=colors, 
+                                      autopct=autopct_format(sizes),
+                                      startangle=90,
+                                      pctdistance=0.75)
     
     ax.axis('equal')
-    plt.title(title)
     
-    # Menyesuaikan ukuran font dan posisi label
-    plt.setp(autotexts, size=8, weight="bold")
-    plt.setp(texts, size=10)
+    plt.title(f"{title}", fontsize=8, fontweight='bold')  # Mengurangi ukuran font judul
     
-    # Menambahkan legenda
-    ax.legend(wedges, labels,
-              title="Categories",
-              loc="center left",
-              bbox_to_anchor=(1, 0, 0.5, 1))
+    # Menambahkan legenda dengan nilai, menggunakan ukuran font yang lebih kecil
+    legend_labels = [f'{label}: {size:,}' for label, size in zip(labels, sizes)]
+    ax.legend(wedges, legend_labels, title="Kategori", loc="center left", 
+              bbox_to_anchor=(1, 0, 0.5, 1), fontsize=6, title_fontsize=7)
+    
+    plt.setp(autotexts, size=6, weight="bold")  # Mengurangi ukuran font teks otomatis
+    plt.setp(texts, size=7)  # Mengurangi ukuran font label
     
     plt.tight_layout()
     
     img_buffer = io.BytesIO()
-    plt.savefig(img_buffer, format='png', bbox_inches='tight')
+    plt.savefig(img_buffer, format='png', bbox_inches='tight', dpi=300)
     img_buffer.seek(0)
     img = Image(img_buffer)
+    plt.close(fig)
+     # Atur ukuran gambar dalam piksel
+    img.width = 380  # 4 inci * 95 DPI
+    img.height = 285  # 3 inci * 95 DPI
+    
     plt.close(fig)
     return img
 
