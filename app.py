@@ -4,6 +4,7 @@ import os
 import openpyxl
 import logging
 import numpy as np
+from io import BytesIO
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -11,6 +12,119 @@ import io
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image
 from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.chart import BarChart, Reference
+from openpyxl.chart.label import DataLabelList
+
+#Chart Buat 
+
+def create_pie_chart(sizes, labels, colors, title):
+    fig, ax = plt.subplots(figsize=(10, 7))
+    ax.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+    ax.axis('equal')
+    plt.title(title)
+    
+    img_buffer = io.BytesIO()
+    plt.savefig(img_buffer, format='png')
+    img_buffer.seek(0)
+    img = Image(img_buffer)
+    plt.close(fig)
+    return img
+
+import logging
+
+def create_charts(data, total_populasi, version_a920pro):
+    charts = []
+    logging.info(f"Total populasi: {total_populasi}")
+
+    def safe_value(value, name):
+        if value < 0:
+            logging.warning(f"Negative value detected for {name}: {value}. Setting to 0.")
+            return 0
+        return value
+
+    def safe_subtract(a, b):
+        return max(0, a - b)
+
+    # 1. Data Download Tams Sharing 10.2.2.5:7000
+    active_sharing = safe_value(data['sharing'].get('Active transaksi', {}).get('Total', 0), "active_sharing")
+    inactive_sharing = safe_subtract(total_populasi, active_sharing)
+    logging.info(f"Sharing - Active: {active_sharing}, Inactive: {inactive_sharing}")
+    
+    charts.append(create_pie_chart(
+        [active_sharing, inactive_sharing],
+        ['Active', 'Inactive'],
+        ['#66b3ff', '#ff9999'],
+        'Data Download Tams Sharing 10.2.2.5:7000'
+    ))
+
+    # 2. Data Apply Tams Sharing 10.2.2.5:7000
+    charts.append(create_pie_chart(
+        [active_sharing, inactive_sharing],
+        ['Active', 'Inactive'],
+        ['#66b3ff', '#ff9999'],
+        'Data Apply Tams Sharing 10.2.2.5:7000'
+    ))
+
+    # 3. Data Download Tams FMS 10.2.30.2:7000
+    active_fms = safe_value(data['fms'].get('Active transaksi', {}).get('Total', 0), "active_fms")
+    inactive_fms = safe_subtract(total_populasi, active_fms)
+    logging.info(f"FMS - Active: {active_fms}, Inactive: {inactive_fms}")
+    
+    charts.append(create_pie_chart(
+        [active_fms, inactive_fms],
+        ['Active', 'Inactive'],
+        ['#66b3ff', '#ff9999'],
+        'Data Download Tams FMS 10.2.30.2:7000'
+    ))
+
+    # 4. Data Apply Tams FMS 10.2.30.2:7000
+    charts.append(create_pie_chart(
+        [active_fms, inactive_fms],
+        ['Active', 'Inactive'],
+        ['#66b3ff', '#ff9999'],
+        'Data Apply Tams FMS 10.2.30.2:7000'
+    ))
+
+    # 5 & 6. Data Download/Apply Tams FMS dan Sharing
+    active_combined = safe_value(active_sharing + active_fms, "active_combined")
+    inactive_combined = safe_subtract(total_populasi, active_combined)
+    logging.info(f"Combined - Active: {active_combined}, Inactive: {inactive_combined}")
+    
+    charts.append(create_pie_chart(
+        [active_combined, inactive_combined],
+        ['Active', 'Inactive'],
+        ['#66b3ff', '#ff9999'],
+        'Data Download/Apply Tams FMS dan Sharing'
+    ))
+
+        # 7. Data Update Aplikasi Versi
+    download_key = next((key for key in data['sharing'] if 'download' in key.lower()), None)
+    if download_key:
+        downloaded = safe_value(data['sharing'][download_key].get('Total', 0) + data['fms'][download_key].get('Total', 0), "downloaded")
+    else:
+        downloaded = 0
+
+    active_not_downloaded = safe_subtract(active_combined, downloaded)
+    inactive = safe_subtract(total_populasi, active_combined)
+    
+    logging.info(f"Update Aplikasi - Downloaded: {downloaded}, Active Not Downloaded: {active_not_downloaded}, Inactive: {inactive}")
+
+    charts.append(create_pie_chart(
+        [downloaded, active_not_downloaded, inactive],
+        ['Downloaded', 'Active Not Downloaded', 'Inactive'],
+        ['#ffa500', '#66b3ff', '#ff9999'],
+        f'Data Update Aplikasi Versi {version_a920pro} Primavista'
+    ))
+
+    return charts
+
+def add_charts_to_worksheet(ws, charts):
+    for i, chart in enumerate(charts):
+        ws.add_image(chart, f'K{1 + i * 20}')
+
+#Akhir Chart Buat
+
+
 def add_dataframe_to_worksheet(ws, df, start_row, start_col):
     # Add headers
     headers = ["Type", "Populasi Tams", "Download Completed start Scheduller", "Apply config", "Active transaksi"]
@@ -132,7 +246,6 @@ logging.basicConfig(level=logging.DEBUG)
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
-        output_filename = request.form.get('output_filename', 'Default')
         logging.info("Received POST request")
         logging.debug(f"Form data: {request.form}")
         logging.debug(f"Files received: {request.files}")
@@ -172,6 +285,10 @@ def upload_file():
             }
             logging.info(f"Versions: {versions}")
 
+            # Get total_populasi from form
+            total_populasi = int(request.form.get('total_populasi', 0))
+            output_filename = request.form.get('output_filename', 'Default')
+
             logging.info("Starting file processing")
 
             wb = openpyxl.Workbook()
@@ -191,7 +308,6 @@ def upload_file():
                 
                 results[data_type] = result
 
-    # ... (kode lainnya untuk menambahkan data ke worksheet)
                 if ws.max_row > 1:
                     ws.append([])
 
@@ -202,6 +318,20 @@ def upload_file():
                 ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=5)
 
                 add_dataframe_to_worksheet(ws, results[data_type], ws.max_row + 1, 1)
+
+            # Add "TAMS FMS dan Sharing" section
+            ws.append([])
+            ws.append(["TAMS FMS dan SHARING "])
+            title_cell = ws.cell(row=ws.max_row, column=1)
+            title_cell.font = Font(size=16, bold=True)
+            title_cell.alignment = Alignment(horizontal='center')
+            ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=5)
+
+            # Combine data from TAMS Sharing and TAMS FMS
+            combined_data = results['sharing'].set_index('Type') + results['fms'].set_index('Type')
+            combined_data = combined_data.reset_index()
+
+            add_dataframe_to_worksheet(ws, combined_data, ws.max_row + 2, 1)  # +2 untuk memberikan satu baris kosong
 
             # Adjust column widths
             for column in ws.columns:
@@ -219,33 +349,58 @@ def upload_file():
                 adjusted_width = (max_length + 2)
                 ws.column_dimensions[column_letter].width = adjusted_width
 
-            # Add "TAMS FMS dan Sharing" section
+            #  # Add percentage calculations
+            # ws.append([])
+            # ws.append(["Persentase"])
+            # percentage_row = ws.max_row
+
+            # for col in range(2, 6):  # Columns B to E
+            #     column_letter = openpyxl.utils.get_column_letter(col)
+            #     total_value = combined_data.iloc[2, col-1]  # Get the total value from the "Total" row
+            #     percentage = (total_value / total_populasi) * 100 if total_populasi > 0 else 0
+            #     ws.cell(row=percentage_row, column=col, value=percentage / 100)
+            #     ws.cell(row=percentage_row, column=col).number_format = '0.00%'
+
+            # Add total_populasi
             ws.append([])
-            ws.append(["TAMS FMS dan SHARING "])
-            title_cell = ws.cell(row=ws.max_row, column=1)
-            title_cell.font = Font(size=16, bold=True)
-            title_cell.alignment = Alignment(horizontal='center')
-            ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=5)
+            ws.append(["Total Populasi", total_populasi])
 
-            # Combine data from TAMS Sharing and TAMS FMS
-            combined_data = results['sharing'].set_index('Type') + results['fms'].set_index('Type')
-            combined_data = combined_data.reset_index()
+             # Membuat data untuk charts
+            data = {
+                'sharing': results['sharing'].set_index('Type').to_dict(),
+                'fms': results['fms'].set_index('Type').to_dict(),
+            }
+            
+            # Membuat charts
+            charts = create_charts(data, total_populasi, versions['sharing']['a920pro'])
 
-            add_dataframe_to_worksheet(ws, combined_data, ws.max_row + 2, 1)  # +2 untuk memberikan satu baris kosong
+            # Menambahkan charts ke worksheet
+            add_charts_to_worksheet(ws, charts)
 
-            # Adjust column widths for the combined section
-            for col in range(1, ws.max_column + 1):
-                max_length = 0
-                column_letter = openpyxl.utils.get_column_letter(col)
-                for row in range(1, ws.max_row + 1):
-                    cell = ws.cell(row=row, column=col)
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = (max_length + 2)
-                ws.column_dimensions[column_letter].width = adjusted_width
+            # # Membuat bar chart (kode yang sudah ada)
+            # chart = BarChart()
+            # chart.type = "col"
+            # chart.style = 10
+            # chart.title = "Persentase Data OTA BRI FMS"
+            # chart.y_axis.title = 'Persentase'
+            # chart.x_axis.title = 'Kategori'
+
+            # data = Reference(ws, min_col=2, min_row=percentage_row, max_row=percentage_row, max_col=5)
+            # cats = Reference(ws, min_col=2, min_row=percentage_row-1, max_row=percentage_row-1, max_col=5)
+            # chart.add_data(data, titles_from_data=True)
+            # chart.set_categories(cats)
+
+            # # Customize chart
+            # chart.height = 15  # height in cm
+            # chart.width = 20   # width in cm
+
+            # # Add data labels
+            # chart.dataLabels = DataLabelList()
+            # chart.dataLabels.showVal = True
+            # chart.dataLabels.format = '0.00%'
+
+            # # Add the bar chart to the worksheet
+            # ws.add_chart(chart, "A" + str(ws.max_row + 2))
 
             # Save Excel file
             output_filename = f'File Data OTA BRI FMS {output_filename}.xlsx'
