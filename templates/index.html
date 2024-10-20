@@ -122,6 +122,13 @@
           </div>
       </div>
 
+      <div class="section" id="periodeota">
+        <h2>Periode OTA</h2>
+        <div id="fmsContent">
+            <label for="output_filename">Periode OTA File Output:</label>
+            <input type="text" class="form-control" id="output_filename" name="output_filename" required>
+        </div>
+    </div>
       <input type="submit" value="Upload">
   </form>
   
@@ -147,6 +154,18 @@
                   input.required = !fmsContent.classList.contains('hidden');
               }
               fmsSection.style.backgroundColor = fmsContent.classList.contains('hidden') ? '#f4f4f4' : '#fff';
+          }
+
+
+          function toggleperiodeota() {
+              const periodeotaContent = document.getElementById('periodeotaContent');
+              const periodeotaSection = document.getElementById('periodeotaSection');
+              fmsContent.classList.toggle('hidden');
+              const inputs = fmsContent.getElementsByTagName('input');
+              for (let input of inputs) {
+                  input.required = !fmsContent.classList.contains('hidden');
+              }
+              periodeotaSection.style.backgroundColor = fmsContent.classList.contains('hidden') ? '#f4f4f4' : '#fff';
           }
   
           document.getElementById('uploadForm').onsubmit = function(e) {
