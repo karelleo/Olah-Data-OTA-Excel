@@ -144,9 +144,48 @@ def create_pie_chart(sizes, labels, colors, title):
     plt.close(fig)
     return img
 
-def add_charts_to_worksheet(ws, charts):
-    for i, chart in enumerate(charts):
-        ws.add_image(chart, f'K{1 + i * 20}')
+from openpyxl.styles import Font
+
+def add_specific_charts_to_worksheet(ws, charts):
+    chart_positions = [
+        ('H', 2),  # 1. Data Download Tams Sharing 10.2.2.5:7000
+        ('O', 2),  # 2. Data Apply Tams Sharing 10.2.2.5:7000
+        ('H', 19), # 3. Data Download Tams FMS 10.2.30.2:7000
+        ('O', 19), # 4. Data Apply Tams FMS 10.2.30.2:7000
+        ('H', 35), # 5. Data Download Tams FMS dan Sharing
+        ('O', 35), # 6. Data Apply Tams FMS dan Sharing
+        ('H', 51), # 7. Data Update Aplikasi Versi
+    ]
+
+    titles = [
+        "1. Data Download Tams Sharing 10.2.2.5:7000",
+        "2. Data Apply Tams Sharing 10.2.2.5:7000",
+        "3. Data Download Tams FMS 10.2.30.2:7000",
+        "4. Data Apply Tams FMS 10.2.30.2:7000",
+        "5. Data Download Tams FMS dan Sharing",
+        "6. Data Apply Tams FMS dan Sharing",
+        "7. Data Update Aplikasi Versi"
+    ]
+
+    for i, (chart, (col, row)) in enumerate(zip(charts, chart_positions)):
+        # Menambahkan judul untuk setiap chart
+        ws.cell(row=row-1, column=ord(col)-64).value = titles[i]
+        ws.cell(row=row-1, column=ord(col)-64).font = Font(bold=True)
+
+        # Menambahkan gambar
+        ws.add_image(chart, f'{col}{row}')
+        
+        # Menyesuaikan ukuran sel
+        img_width_cm = chart.width / 37.795275591  # Konversi piksel ke cm
+        img_height_cm = chart.height / 37.795275591
+        
+        ws.column_dimensions[col].width = img_width_cm / 0.748031496  # Konversi cm ke lebar kolom Excel
+        
+        # Menyesuaikan tinggi baris untuk chart
+        for j in range(15):  # Mengasumsikan setiap chart membutuhkan 15 baris
+            ws.row_dimensions[row + j].height = (img_height_cm / 15) / 0.035  # Konversi cm ke tinggi baris Excel
+
+    return ws
 #Akhir Chart Buat
 
 
@@ -400,7 +439,7 @@ def upload_file():
             charts = create_charts(data, total_populasi, versions['sharing']['a920pro'])
 
             # Menambahkan charts ke worksheet
-            add_charts_to_worksheet(ws, charts)
+            add_specific_charts_to_worksheet(ws, charts)
 
             # # Membuat bar chart (kode yang sudah ada)
             # chart = BarChart()
