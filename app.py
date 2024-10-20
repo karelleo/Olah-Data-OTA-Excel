@@ -34,94 +34,121 @@ import logging
 
 def create_charts(data, total_populasi, version_a920pro):
     charts = []
-    logging.info(f"Total populasi: {total_populasi}")
 
-    def safe_value(value, name):
-        if value < 0:
-            logging.warning(f"Negative value detected for {name}: {value}. Setting to 0.")
-            return 0
-        return value
-
-    def safe_subtract(a, b):
-        return max(0, a - b)
+    # Helper function untuk menghitung nilai yang tidak aktif/belum didownload/diapply
+    def calculate_inactive(active):
+        return max(0, total_populasi - active)
 
     # 1. Data Download Tams Sharing 10.2.2.5:7000
-    active_sharing = safe_value(data['sharing'].get('Active transaksi', {}).get('Total', 0), "active_sharing")
-    inactive_sharing = safe_subtract(total_populasi, active_sharing)
-    logging.info(f"Sharing - Active: {active_sharing}, Inactive: {inactive_sharing}")
-    
+    download_sharing = data['sharing'].get('Download Completed start Scheduller', {}).get('Total', 0)
     charts.append(create_pie_chart(
-        [active_sharing, inactive_sharing],
-        ['Active', 'Inactive'],
-        ['#66b3ff', '#ff9999'],
+        [download_sharing, calculate_inactive(download_sharing)],
+        ['Downloaded', 'Not Downloaded'],
+        ['#0000ff', '#ff9999'],
         'Data Download Tams Sharing 10.2.2.5:7000'
     ))
 
     # 2. Data Apply Tams Sharing 10.2.2.5:7000
+    apply_sharing = data['sharing'].get('Apply config', {}).get('Total', 0)
     charts.append(create_pie_chart(
-        [active_sharing, inactive_sharing],
-        ['Active', 'Inactive'],
-        ['#66b3ff', '#ff9999'],
+        [apply_sharing, calculate_inactive(apply_sharing)],
+        ['Applied', 'Not Applied'],
+        ['#0000ff', '#ff9999'],
         'Data Apply Tams Sharing 10.2.2.5:7000'
     ))
 
     # 3. Data Download Tams FMS 10.2.30.2:7000
-    active_fms = safe_value(data['fms'].get('Active transaksi', {}).get('Total', 0), "active_fms")
-    inactive_fms = safe_subtract(total_populasi, active_fms)
-    logging.info(f"FMS - Active: {active_fms}, Inactive: {inactive_fms}")
-    
+    download_fms = data['fms'].get('Download Completed start Scheduller', {}).get('Total', 0)
     charts.append(create_pie_chart(
-        [active_fms, inactive_fms],
-        ['Active', 'Inactive'],
-        ['#66b3ff', '#ff9999'],
+        [download_fms, calculate_inactive(download_fms)],
+        ['Downloaded', 'Not Downloaded'],
+        ['#0000ff', '#ff9999'],
         'Data Download Tams FMS 10.2.30.2:7000'
     ))
 
     # 4. Data Apply Tams FMS 10.2.30.2:7000
+    apply_fms = data['fms'].get('Apply config', {}).get('Total', 0)
     charts.append(create_pie_chart(
-        [active_fms, inactive_fms],
-        ['Active', 'Inactive'],
-        ['#66b3ff', '#ff9999'],
+        [apply_fms, calculate_inactive(apply_fms)],
+        ['Applied', 'Not Applied'],
+        ['#0000ff', '#ff9999'],
         'Data Apply Tams FMS 10.2.30.2:7000'
     ))
 
     # 5 & 6. Data Download/Apply Tams FMS dan Sharing
-    active_combined = safe_value(active_sharing + active_fms, "active_combined")
-    inactive_combined = safe_subtract(total_populasi, active_combined)
-    logging.info(f"Combined - Active: {active_combined}, Inactive: {inactive_combined}")
+    download_combined = download_sharing + download_fms
+    apply_combined = apply_sharing + apply_fms
     
     charts.append(create_pie_chart(
-        [active_combined, inactive_combined],
-        ['Active', 'Inactive'],
-        ['#66b3ff', '#ff9999'],
-        'Data Download/Apply Tams FMS dan Sharing'
+        [download_combined, calculate_inactive(download_combined)],
+        ['Downloaded', 'Not Downloaded'],
+        ['#0000ff', '#ff9999'],
+        'Data Download Tams FMS dan Sharing'
+    ))
+    
+    charts.append(create_pie_chart(
+        [apply_combined, calculate_inactive(apply_combined)],
+        ['Applied', 'Not Applied'],
+        ['#0000ff', '#ff9999'],
+        'Data Apply Tams FMS dan Sharing'
     ))
 
         # 7. Data Update Aplikasi Versi
-    download_key = next((key for key in data['sharing'] if 'download' in key.lower()), None)
-    if download_key:
-        downloaded = safe_value(data['sharing'][download_key].get('Total', 0) + data['fms'][download_key].get('Total', 0), "downloaded")
-    else:
-        downloaded = 0
-
-    active_not_downloaded = safe_subtract(active_combined, downloaded)
-    inactive = safe_subtract(total_populasi, active_combined)
-    
-    logging.info(f"Update Aplikasi - Downloaded: {downloaded}, Active Not Downloaded: {active_not_downloaded}, Inactive: {inactive}")
+    active_transaction = data['sharing'].get('Active transaksi', {}).get('Total', 0) + data['fms'].get('Active transaksi', {}).get('Total', 0)
+    downloaded = download_combined
+    active_not_downloaded = max(0, active_transaction - downloaded)
+    inactive = max(0, total_populasi - downloaded - active_not_downloaded)
 
     charts.append(create_pie_chart(
         [downloaded, active_not_downloaded, inactive],
         ['Downloaded', 'Active Not Downloaded', 'Inactive'],
-        ['#ffa500', '#66b3ff', '#ff9999'],
+        ['#ffa500', '#0000ff', '#ff9999'],
         f'Data Update Aplikasi Versi {version_a920pro} Primavista'
     ))
 
     return charts
 
+def create_pie_chart(sizes, labels, colors, title):
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    total = sum(sizes)
+    
+    def make_autopct(values):
+        def my_autopct(pct):
+            total = sum(values)
+            val = int(round(pct*total/100.0))
+            return f'{val:d} ({pct:.1f}%)'
+        return my_autopct
+    
+    wedges, texts, autotexts = ax.pie(sizes, labels=labels, colors=colors, 
+                                      autopct=make_autopct(sizes), 
+                                      startangle=90)
+    
+    ax.axis('equal')
+    plt.title(title)
+    
+    # Menyesuaikan ukuran font dan posisi label
+    plt.setp(autotexts, size=8, weight="bold")
+    plt.setp(texts, size=10)
+    
+    # Menambahkan legenda
+    ax.legend(wedges, labels,
+              title="Categories",
+              loc="center left",
+              bbox_to_anchor=(1, 0, 0.5, 1))
+    
+    plt.tight_layout()
+    
+    img_buffer = io.BytesIO()
+    plt.savefig(img_buffer, format='png', bbox_inches='tight')
+    img_buffer.seek(0)
+    img = Image(img_buffer)
+    plt.close(fig)
+    return img
+
 def add_charts_to_worksheet(ws, charts):
     for i, chart in enumerate(charts):
         ws.add_image(chart, f'K{1 + i * 20}')
-
 #Akhir Chart Buat
 
 
