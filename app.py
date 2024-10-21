@@ -14,6 +14,228 @@ from openpyxl.drawing.image import Image
 from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.label import DataLabelList
+from datetime import datetime, timedelta
+
+#downlaod history
+
+def cm_to_EMU(width, height):
+    return (int(width * 360000), int(height * 360000))
+
+def write_to_cell(ws, row, col, value):
+    cell = ws.cell(row=row, column=col)
+    if cell.coordinate in ws.merged_cells:
+        merged_range = [merged for merged in ws.merged_cells.ranges if cell.coordinate in merged][0]
+        cell = ws.cell(row=merged_range.min_row, column=merged_range.min_col)
+    cell.value = value
+    return cell
+
+def process_download_history(file_terminal_download_sharing, file_terminal_download_fms, version_a920pro, version_x990):
+    def read_excel_file(file_path):
+        try:
+            df = pd.read_excel(file_path, header=4)
+            logging.info(f"Columns in file {file_path}: {df.columns.tolist()}")
+            return df
+        except Exception as e:
+            logging.error(f"Error membaca file {file_path}: {e}")
+            return pd.DataFrame()
+
+    # Membaca dan menggabungkan semua file
+    dfs = []
+    for file in file_terminal_download_sharing + file_terminal_download_fms:
+        df = read_excel_file(file)
+        if not df.empty:
+            dfs.append(df)
+
+    if not dfs:
+        logging.error("Tidak ada data yang berhasil dibaca dari file")
+        return pd.DataFrame()
+
+    df_combined = pd.concat(dfs, ignore_index=True)
+
+    # Filter data sesuai dengan "Download Completed start Scheduller"
+    df_filtered = df_combined[
+        (
+            (
+                (df_combined['Terminal Model'] == 'A920Pro') &
+                (df_combined['App Name'] == 'A920PRO_BRIREGULAR') &
+                (df_combined['Version'] == version_a920pro)
+            ) |
+            (
+                (df_combined['Terminal Model'] == 'X990') &
+                (df_combined['App Name'] == 'X990_BRIREGULAR') &
+                (df_combined['Version'] == version_x990)
+            )
+        ) &
+        (df_combined['Status'] == 'Completed')
+    ]
+
+    # Menghilangkan duplikasi berdasarkan Serial Number
+    df_filtered = df_filtered.drop_duplicates(subset=['Serial Number'])
+
+    # Mengkonversi 'Date Time' ke datetime dan mengambil tanggalnya saja
+    df_filtered['Date'] = pd.to_datetime(df_filtered['Date Time']).dt.date
+
+    # Menghitung jumlah download per hari
+    daily_counts = df_filtered.groupby('Date').size().reset_index(name='Jumlah Download Completed')
+    daily_counts = daily_counts.sort_values('Date')
+
+    # Mengisi tanggal yang kosong dengan 0 download
+    date_range = pd.date_range(start=daily_counts['Date'].min(), end=daily_counts['Date'].max())
+    daily_counts = daily_counts.set_index('Date').reindex(date_range, fill_value=0).reset_index()
+    daily_counts = daily_counts.rename(columns={'index': 'Date'})
+
+    # Menghitung total kumulatif
+    daily_counts['Total Kumulatif'] = daily_counts['Jumlah Download Completed'].cumsum()
+
+    # Menghitung Pertumbuhan per Hari
+    daily_counts['Pertumbuhan per Hari'] = daily_counts['Total Kumulatif'] - daily_counts['Jumlah Download Completed']
+
+    # Mengubah nama kolom 'Date' menjadi 'Tanggal Download'
+    daily_counts = daily_counts.rename(columns={'Date': 'Tanggal Download'})
+
+    return daily_counts
+
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Alignment, Font
+
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+
+def add_download_history_to_worksheet(ws, download_history):
+    start_row = 24  # Mulai dari baris ke-24
+    start_col = 1
+
+    # Definisikan warna merah maron
+    maroon_color = PatternFill(start_color="800000", end_color="800000", fill_type="solid")
+    white_font = Font(color="FFFFFF", bold=True)
+
+    # Tambahkan header
+    headers = ["Tanggal Download", "Jumlah Download Completed", "Pertumbuhan per Hari", "Total Kumulatif"]
+    for col, header in enumerate(headers, start=start_col):
+        cell = write_to_cell(ws, start_row, col, header)
+        cell.fill = maroon_color
+        cell.font = white_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    # Tambahkan border ke header
+    border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    for col in range(start_col, start_col + len(headers)):
+        ws.cell(row=start_row, column=col).border = border
+
+    # Tambahkan data
+    for _, row in download_history.iterrows():
+        start_row += 1
+        ws.cell(row=start_row, column=start_col, value=row['Tanggal Download']).number_format = 'yyyy-mm-dd'
+        
+        # Format Jumlah Download Completed dengan '+' di depan dan rata kanan
+        jumlah_download_cell = ws.cell(row=start_row, column=start_col+1, value=row['Jumlah Download Completed'])
+        jumlah_download_cell.number_format = '+#,##0;-#,##0'
+        jumlah_download_cell.alignment = Alignment(horizontal='right')
+        
+        # Format Pertumbuhan per Hari tanpa '+' dan rata kanan
+        pertumbuhan_cell = ws.cell(row=start_row, column=start_col+2, value=row['Pertumbuhan per Hari'])
+        pertumbuhan_cell.number_format = '#,##0;-#,##0'
+        pertumbuhan_cell.alignment = Alignment(horizontal='right')
+        
+        ws.cell(row=start_row, column=start_col+3, value=row['Total Kumulatif']).alignment = Alignment(horizontal='right')
+
+        # Tambahkan border ke data
+        for col in range(start_col, start_col + len(headers)):
+            ws.cell(row=start_row, column=col).border = border
+
+    # Sesuaikan lebar kolom
+    for col in range(start_col, start_col + len(headers)):
+        max_length = 0
+        column_letter = get_column_letter(col)
+        for cell in ws[column_letter][start_row-1:]:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = (max_length + 2) 
+        ws.column_dimensions[column_letter].width = adjusted_width
+
+    return ws, start_row, start_row
+
+
+#akhir Dwonlaod history
+
+#Chart download history
+
+from openpyxl.chart import LineChart, Reference
+from openpyxl.chart.axis import DateAxis
+import logging
+from datetime import datetime
+from openpyxl.chart import (
+    ScatterChart,
+    Reference,
+    Series,
+)
+from openpyxl.drawing.spreadsheet_drawing import (
+    OneCellAnchor,
+    AnchorMarker
+)
+
+from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+from openpyxl.drawing.xdr import XDRPositiveSize2D
+from openpyxl.utils.units import cm_to_EMU
+
+# def add_download_history_chart(ws, start_row, end_row):
+#     chart = ScatterChart()
+#     chart.title = "Download History"
+#     chart.style = 2
+#     chart.y_axis.title = 'Jumlah EDC'
+#     chart.x_axis.title = 'Tanggal'
+
+#     # Data untuk jumlah download
+#     y_values = Reference(ws, min_col=2, min_row=start_row, max_row=end_row)
+#     x_values = Reference(ws, min_col=1, min_row=start_row, max_row=end_row)
+#     series = Series(y_values, x_values, title="Jumlah Download Completed")
+#     chart.series.append(series)
+
+#     # Mengatur sumbu y (Jumlah EDC)
+#     chart.y_axis.scaling.min = 0
+#     chart.y_axis.scaling.max = 2000  # Ubah nilai maksimum menjadi 2000
+#     chart.y_axis.majorUnit = 400  # Ubah unit utama menjadi 400 untuk pembagian yang lebih baik
+
+#     # Mengatur sumbu x (Tanggal)
+#     chart.x_axis.number_format = 'dd'
+#     chart.x_axis.majorUnit = 1
+#     chart.x_axis.tickLblPos = "low"
+
+#     # Mengatur ukuran grafik
+#     width_cm = 30
+#     height_cm = 15
+#     size = XDRPositiveSize2D(cm_to_EMU(width_cm), cm_to_EMU(height_cm))
+
+#     # Menambahkan grafik ke worksheet
+#     anchor = OneCellAnchor(
+#         _from=AnchorMarker(col=0, colOff=0, row=end_row + 2, rowOff=0),
+#         ext=size
+#     )
+#     ws.add_chart(chart, anchor)
+    
+#     return ws
+
+
+
+# Tambahkan fungsi ini untuk menyesuaikan lebar kolom
+def adjust_column_width(ws):
+    for column in ws.columns:
+        max_length = 0
+        column_letter = get_column_letter(column[0].column)
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(cell.value)
+            except:
+                pass
+        adjusted_width = (max_length + 2) * 1.2
+        ws.column_dimensions[column_letter].width = adjusted_width
+
+
+
+#end chart
 
 #Chart Buat 
 
@@ -31,7 +253,7 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [download_sharing, calculate_inactive(download_sharing)],
         ['Downloaded', 'Not Downloaded'],
-        ['#0000ff', '#ff0000'],
+        ['#005FAC', '#b81414'],
         'Data Download Tams Sharing\n10.2.2.5:7000\n\n'
     ))
 
@@ -40,7 +262,7 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [apply_sharing, calculate_inactive(apply_sharing)],
         ['Applied', 'Not Applied'],
-        ['#0000ff', '#ff0000'],
+        ['#005FAC', '#b81414'],
         'Data Apply Tams Sharing\n10.2.2.5:7000\n\n'
     ))
 
@@ -49,7 +271,7 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [download_fms, calculate_inactive(download_fms)],
         ['Downloaded', 'Not Downloaded'],
-        ['#0000ff', '#ff0000'],
+        ['#005FAC', '#b81414'],
         'Data Download Tams FMS\n10.2.30.2:7000\n\n'
     ))
 
@@ -58,7 +280,7 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [apply_fms, calculate_inactive(apply_fms)],
         ['Applied', 'Not Applied'],
-        ['#0000ff', '#ff0000'],
+        ['#005FAC', '#b81414'],
         'Data Apply Tams FMS\n10.2.30.2:7000\n\n'
     ))
 
@@ -69,14 +291,14 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [download_combined, calculate_inactive(download_combined)],
         ['Downloaded', 'Not Downloaded'],
-        ['#0000ff', '#ff0000'],
+        ['#005FAC', '#b81414'],
         'Data Download Tams FMS dan Sharing\n\n'
     ))
     
     charts.append(create_pie_chart(
         [apply_combined, calculate_inactive(apply_combined)],
         ['Applied', 'Not Applied'],
-        ['#0000ff', '#ff0000'],
+        ['#005FAC', '#b81414'],
         'Data Apply Tams FMS dan Sharing\n\n'
     ))
 
@@ -93,7 +315,7 @@ def create_charts(data, total_populasi, version_a920pro):
     charts.append(create_pie_chart(
         [downloaded, active_not_downloaded, inactive],
         ['EDC Sudah OTA', 'EDC Belum OTA', 'EDC Tidak Aktif'],
-        ['#ffa500', '#0000ff', '#ff0000'],
+        ['#ffa500', '#005FAC', '#b81414'],
         f'Data Update Aplikasi Versi {version_2digit} Primavista \n\n '
     ))
 
@@ -191,15 +413,13 @@ def add_specific_charts_to_worksheet(ws, charts):
 
 def add_dataframe_to_worksheet(ws, df, start_row, start_col):
     # Add headers
-    headers = ["Type", "Populasi Tams", "Download Completed start Scheduller", "Apply config", "Active transaksi"]
-    for col, header in enumerate(headers, start=start_col):
-        cell = ws.cell(row=start_row, column=col, value=header)
-        cell.font = Font(bold=True)
+    for col, header in enumerate(df.columns, start=start_col):
+        write_to_cell(ws, start_row, col, header)
     
     # Add data
     for r_idx, row in enumerate(df.itertuples(index=False), start=start_row+1):
         for c_idx, value in enumerate(row, start=start_col):
-            ws.cell(row=r_idx, column=c_idx, value=value)
+            write_to_cell(ws, r_idx, c_idx, value)
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -382,93 +602,107 @@ def upload_file():
                 ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=5)
 
                 add_dataframe_to_worksheet(ws, results[data_type], ws.max_row + 1, 1)
+                last_row = ws.max_row
+            
+            start_row = 1
 
-            # Add "TAMS FMS dan Sharing" section
-            ws.append([])
-            ws.append(["TAMS FMS dan SHARING "])
-            title_cell = ws.cell(row=ws.max_row, column=1)
+            for data_type, title in [('sharing', 'TAMS SHARING 10.2.2.5:7000'),
+                                    ('fms', 'TAMS FMS 10.2.30.2:7000')]:
+                result = process_files(
+                    file_paths[data_type],
+                    versions[data_type]['a920pro'],
+                    versions[data_type]['x990']
+                )
+
+                if result is None:
+                    return f"Error processing data for {data_type}", 400
+
+                results[data_type] = result
+
+                def write_to_cell(ws, row, col, value):
+                    cell = ws.cell(row=row, column=col)
+                    if cell.coordinate in ws.merged_cells:
+                        merged_range = [merged for merged in ws.merged_cells.ranges if cell.coordinate in merged][0]
+                        cell = ws.cell(row=merged_range.min_row, column=merged_range.min_col)
+                    cell.value = value
+                    return cell
+
+                title_cell = write_to_cell(ws, start_row, 1, title)
+                title_cell.font = Font(size=16, bold=True)
+                title_cell.alignment = Alignment(horizontal='center')
+                ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=5)
+
+                add_dataframe_to_worksheet(ws, results[data_type], start_row + 1, 1)
+                start_row += len(results[data_type]) + 3  # +3 for title, header, and space
+
+            # Add "TAMS FMS dan SHARING" section
+            ws.cell(row=13, column=1, value="TAMS FMS dan SHARING")
+            title_cell = ws.cell(row=13, column=1)
             title_cell.font = Font(size=16, bold=True)
             title_cell.alignment = Alignment(horizontal='center')
-            ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=5)
+            ws.merge_cells(start_row=13, start_column=1, end_row=13, end_column=5)
 
             # Combine data from TAMS Sharing and TAMS FMS
             combined_data = results['sharing'].set_index('Type') + results['fms'].set_index('Type')
             combined_data = combined_data.reset_index()
 
-            add_dataframe_to_worksheet(ws, combined_data, ws.max_row + 2, 1)  # +2 untuk memberikan satu baris kosong
+            add_dataframe_to_worksheet(ws, combined_data, 14, 1)
+
+            # Process download history
+            file_terminal_download_sharing = file_paths['sharing']['file_terminal_download']
+            file_terminal_download_fms = file_paths['fms']['file_terminal_download']
+
+            if file_terminal_download_sharing and file_terminal_download_fms:
+                try:
+                    download_history = process_download_history(
+                        file_terminal_download_sharing,
+                        file_terminal_download_fms,
+                        versions['sharing']['a920pro'],
+                        versions['sharing']['x990']
+                    )
+                    if not download_history.empty:
+                        ws, start_row, end_row = add_download_history_to_worksheet(ws, download_history)
+                        # ws = add_download_history_chart(ws, start_row, end_row)
+
+                        # Menyesuaikan lebar kolom
+                        adjust_column_width(ws)
+                    else:
+                        logging.warning("Download history is empty")
+                        write_to_cell(ws, last_row+1, 1, "Tidak ada data download history yang memenuhi kriteria")
+                        last_row += 1
+                except Exception as e:
+                    logging.error(f"Error processing download history: {e}")
+                    ws.cell(row=last_row+1, column=1, value="Error dalam memproses download history")
+                    last_row += 1
+            else:
+                logging.error("One or both download history files are missing")
+                ws.cell(row=last_row+1, column=1, value="File download history tidak lengkap")
+                last_row += 1
 
             # Adjust column widths
-            for column in ws.columns:
-                max_length = 0
-                column_letter = openpyxl.utils.get_column_letter(column[0].column)
-                for cell in column:
-                    try:
-                        if cell.coordinate in ws.merged_cells:  # Skip merged cells
-                            continue
-                        cell_value = str(cell.value) if cell.value is not None else ''
-                        if len(cell_value) > max_length:
-                            max_length = len(cell_value)
-                    except AttributeError:
-                        pass
-                adjusted_width = (max_length + 2)
-                ws.column_dimensions[column_letter].width = adjusted_width
-
-            #  # Add percentage calculations
-            # ws.append([])
-            # ws.append(["Persentase"])
-            # percentage_row = ws.max_row
-
-            # for col in range(2, 6):  # Columns B to E
-            #     column_letter = openpyxl.utils.get_column_letter(col)
-            #     total_value = combined_data.iloc[2, col-1]  # Get the total value from the "Total" row
-            #     percentage = (total_value / total_populasi) * 100 if total_populasi > 0 else 0
-            #     ws.cell(row=percentage_row, column=col, value=percentage / 100)
-            #     ws.cell(row=percentage_row, column=col).number_format = '0.00%'
+            adjust_column_width(ws)
 
             # Add total_populasi
-            ws.append([])
-            ws.append(["Total Populasi", total_populasi])
+            last_row += 1
+            write_to_cell(ws, last_row, 1, "Total Populasi")
+            write_to_cell(ws, last_row, 2, total_populasi)
 
-             # Membuat data untuk charts
+            # Membuat data untuk charts
             data = {
                 'sharing': results['sharing'].set_index('Type').to_dict(),
                 'fms': results['fms'].set_index('Type').to_dict(),
             }
-            
+
             # Membuat charts
             charts = create_charts(data, total_populasi, versions['sharing']['a920pro'])
 
             # Menambahkan charts ke worksheet
             add_specific_charts_to_worksheet(ws, charts)
 
-            # # Membuat bar chart (kode yang sudah ada)
-            # chart = BarChart()
-            # chart.type = "col"
-            # chart.style = 10
-            # chart.title = "Persentase Data OTA BRI FMS"
-            # chart.y_axis.title = 'Persentase'
-            # chart.x_axis.title = 'Kategori'
-
-            # data = Reference(ws, min_col=2, min_row=percentage_row, max_row=percentage_row, max_col=5)
-            # cats = Reference(ws, min_col=2, min_row=percentage_row-1, max_row=percentage_row-1, max_col=5)
-            # chart.add_data(data, titles_from_data=True)
-            # chart.set_categories(cats)
-
-            # # Customize chart
-            # chart.height = 15  # height in cm
-            # chart.width = 20   # width in cm
-
-            # # Add data labels
-            # chart.dataLabels = DataLabelList()
-            # chart.dataLabels.showVal = True
-            # chart.dataLabels.format = '0.00%'
-
-            # # Add the bar chart to the worksheet
-            # ws.add_chart(chart, "A" + str(ws.max_row + 2))
-
-            # Save Excel file
-            output_filename = f'File Data OTA BRI FMS {output_filename}.xlsx'
-            wb.save(output_filename)
+            # Simpan workbook ke dalam BytesIO object
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
 
             # Delete uploaded files
             for data_type in file_paths:
@@ -476,13 +710,30 @@ def upload_file():
                     for file_path in file_paths[data_type][file_key]:
                         try:
                             os.remove(file_path)
+                            logging.info(f"Deleted file: {file_path}")
                         except Exception as e:
-                            print(f"Error deleting file: {e}")
+                            logging.error(f"Error deleting file: {e}")
 
-            return send_file(output_filename, as_attachment=True)
+            # Kirim file sebagai attachment
+            return send_file(
+                output,
+                as_attachment=True,
+                download_name=f"File Data OTA BRI FMS {output_filename}.xlsx",
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
         except Exception as e:
             logging.exception(f"Unexpected error occurred: {e}")
+            # Attempt to delete any remaining uploaded files
+            for data_type in file_paths:
+                for file_key in file_paths[data_type]:
+                    for file_path in file_paths[data_type][file_key]:
+                        try:
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                                logging.info(f"Deleted file during error handling: {file_path}")
+                        except Exception as delete_error:
+                            logging.error(f"Error deleting file during error handling: {delete_error}")
             return f"An unexpected error occurred: {str(e)}", 500
 
     return render_template('index.html')
